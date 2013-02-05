@@ -82,16 +82,17 @@ end
 Process.daemon
 
 g.notify "notification", "CodeWatch", "Watch Started #{local}"
+puts "Sync finished"
 fsevent = FSEvent.new
 fsevent.watch local do |directories|
     #$stderr.puts "# detected change inside: #{directories.inspect}"
     directories.each do |dir|
         pathname2 = "#{dir.sub(local, "")}"
         #ignore some stuff
-        if pathname2.match('/\.svn/.*$') != nil || 
-            pathname2.match('/\.hg/.*$') != nil || 
+        if pathname2.match('/\.svn/.*$')  != nil || 
+            pathname2.match('/\.hg/.*$')  != nil || 
             pathname2.match('/compile/$') != nil || 
-            pathname2.match('/cache/$') != nil then
+            pathname2.match('/cache/$')   != nil then
             next
         end
         l = "#{local}#{pathname2}".gsub(' ', '\\\\ ')
@@ -99,7 +100,9 @@ fsevent.watch local do |directories|
 
         cmd = "rsync -tzplr --exclude='/*/*' --exclude='logs' --exclude='scripts' --exclude='*.swp' --exclude='templates_c' --exclude='.tags' #{l} #{r}"
         g.notify "notification", "CodeWatch", "#{pathname2}"
-        system(cmd)
+        if system(cmd) == nil
+            g.notify "notification", "CodeWatch", $?
+        end
     end
 end
 fsevent.run
