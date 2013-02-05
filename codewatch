@@ -1,0 +1,105 @@
+#!/usr/bin/env ruby
+require 'rubygems'
+require 'rb-fsevent'
+require 'ruby-growl'
+
+g = Growl.new "localhost", "ruby-growl"
+g.add_notification "notification", "CodeWatch"
+
+# Script name
+me = File.basename($0, File.extname($0))
+usage = "#{me} (stop|start local remote)"
+
+# Parse options
+if ARGV.length < 1
+    puts "No parameters were passed"
+    puts usage
+    exit 0
+end
+
+action = ARGV.shift
+
+if /start|stop/.match(action) == nil
+    puts "Missing action (start|stop)"
+    puts usage
+    exit 0
+end
+
+# Determine if there is a process currently running
+currentPid = Process.pid
+processLines = `ps aux | grep #{me} | grep start | grep -v #{currentPid}| grep -v grep`.split("\n")
+
+# Exit if the action is start and there is a process
+if action == "start" && processLines.length > 0
+    puts "#{me} is already running"
+    exit 0
+end
+
+pid = nil
+if processLines.length > 0
+    pid = processLines[0].split[1]
+end
+
+# Stop process
+if action == "stop" && pid != nil
+    Process.kill("INT", pid.to_i)
+    msg = "#{me} process was killed"
+    g.notify "notification", "CodeWatch", msg
+    puts msg
+    exit 1
+end
+
+# Get local and remote options
+if ARGV.length < 2
+    puts "local and remote paths are required"
+    puts usage
+    exit 0
+end
+
+local  = ARGV.shift
+remote = ARGV.shift
+
+# Decide on the local path.
+Dir.mkdir(local) unless File.directory?(local)
+local = File.expand_path(local)
+
+# Parse the server and remote path.  Decide on the remote username.
+raise unless remote =~ /^(?:([^@]+)@)?([^:]+):(.+)$/
+    user, server, remote = $1, $2, $3
+user ||= ENV["USER"]
+
+# Initially sync from remote to local
+syncLocalToRemote = "rsync -rtlz --exclude=sql --exclude=logs --exclude=script --exclude=templates_c #{user}@#{server}:#{remote} #{local}"
+g.notify "notification", "CodeWatch", "Starting Sync"
+puts "Syncing.... Watching has not yet started."
+if  system(syncLocalToRemote) == nil
+    puts "There was an error in rsync"
+    puts $?
+    exit 0
+end
+
+# Daemonize
+Process.daemon
+
+g.notify "notification", "CodeWatch", "Watch Started #{local}"
+fsevent = FSEvent.new
+fsevent.watch local do |directories|
+    #$stderr.puts "# detected change inside: #{directories.inspect}"
+    directories.each do |dir|
+        pathname2 = "#{dir.sub(local, "")}"
+        #ignore some stuff
+        if pathname2.match('/\.svn/.*$') != nil || 
+            pathname2.match('/\.hg/.*$') != nil || 
+            pathname2.match('/compile/$') != nil || 
+            pathname2.match('/cache/$') != nil then
+            next
+        end
+        l = "#{local}#{pathname2}".gsub(' ', '\\\\ ')
+        r =  "#{user}@#{server}:#{remote}#{pathname2}".gsub(' ', '\\\\ ')
+
+        cmd = "rsync -tzplr --exclude='/*/*' --exclude='logs' --exclude='scripts' --exclude='*.swp' --exclude='templates_c' --exclude='.tags' #{l} #{r}"
+        g.notify "notification", "CodeWatch", "#{pathname2}"
+        system(cmd)
+    end
+end
+fsevent.run
