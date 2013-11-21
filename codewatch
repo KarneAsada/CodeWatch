@@ -3,8 +3,24 @@ require 'rubygems'
 require 'rb-fsevent'
 require 'ruby-growl'
 
-g = Growl.new "localhost", "ruby-growl"
-g.add_notification "notification", "CodeWatch"
+# Init Growl
+$growl = nil
+begin
+    $growl = Growl.new "localhost", "ruby-growl"
+    $growl.add_notification "notification", "CodeWatch"
+rescue Exception => e
+    puts "Growl init failed"
+    puts e.message
+end
+
+# Send message to Growl, or stdout if no Growl present
+def grr( msg )
+    begin
+        $growl.notify "notification", "CodeWatch", msg
+    rescue
+        msg
+    end
+end
 
 # Script name
 me = File.basename($0, File.extname($0))
@@ -44,7 +60,7 @@ end
 if action == "stop" && pid != nil
     Process.kill("INT", pid.to_i)
     msg = "#{me} process was killed"
-    g.notify "notification", "CodeWatch", msg
+    grr msg
     puts msg
     exit 1
 end
@@ -69,8 +85,8 @@ raise unless remote =~ /^(?:([^@]+)@)?([^:]+):(.+)$/
 user ||= ENV["USER"]
 
 # Initially sync from remote to local
-syncLocalToRemote = "rsync -rtlz --exclude=sql --exclude=logs --exclude=script --exclude=templates_c #{user}@#{server}:#{remote} #{local}"
-g.notify "notification", "CodeWatch", "Starting Sync"
+syncLocalToRemote = "rsync -rtlzv --exclude=sql --exclude=logs --exclude=templates_c #{user}@#{server}:#{remote} #{local}"
+grr "Starting Sync"
 puts "Syncing.... Watching has not yet started."
 if  system(syncLocalToRemote) == nil
     puts "There was an error in rsync"
@@ -81,7 +97,7 @@ end
 # Daemonize
 Process.daemon
 
-g.notify "notification", "CodeWatch", "Watch Started #{local}"
+grr "Watch Started #{local}"
 puts "Sync finished"
 fsevent = FSEvent.new
 fsevent.watch local do |directories|
@@ -98,10 +114,10 @@ fsevent.watch local do |directories|
         l = "#{local}#{pathname2}".gsub(' ', '\\\\ ')
         r =  "#{user}@#{server}:#{remote}#{pathname2}".gsub(' ', '\\\\ ')
 
-        cmd = "rsync -tzplr --exclude='/*/*' --exclude='logs' --exclude='scripts' --exclude='*.swp' --exclude='templates_c' --exclude='.tags' #{l} #{r}"
-        g.notify "notification", "CodeWatch", "#{pathname2}"
+        cmd = "rsync -tzplr --exclude='/*/*' --exclude='logs' --exclude='*.swp' --exclude='templates_c' --exclude='.tags' #{l} #{r}"
+        grr "#{pathname2}"
         if system(cmd) == nil
-            g.notify "notification", "CodeWatch", $?
+            grr $?
         end
     end
 end
